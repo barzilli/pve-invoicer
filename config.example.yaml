@@ -1,0 +1,51 @@
+# pve-invoicer configuration. Copy to /etc/pve-invoicer/config.yaml.
+# Secrets are NOT stored here. Set them in /etc/pve-invoicer/env:
+#   PVE_TOKEN_SECRET=...   (Proxmox API token secret, required)
+#   SMTP_PASSWORD=...      (if your relay needs a login)
+#   PROMETHEUS_TOKEN=...   (only if Prometheus needs a bearer token)
+
+timezone: Europe/Amsterdam          # day and month boundaries
+database: /var/lib/pve-invoicer/invoicer.db
+output_dir: /var/lib/pve-invoicer/invoices
+min_coverage: 0.95                  # warn when a running guest has fewer samples than this on a day
+
+currency: EUR
+rates:                              # cluster-wide, applied to every guest
+  vcpu_hour: 0.004                  # per allocated vCPU per hour the guest runs
+  ram_gib_hour: 0.002               # per allocated GiB RAM per hour the guest runs
+  disk_gib_month: 0.05              # per allocated GiB disk per month, running or stopped
+  network_gb: 0.01                  # per GB (10^9 bytes) in + out
+
+prometheus:
+  url: http://prometheus.example.internal:9090
+  step_minutes: 5                   # >= your scrape interval of the pve exporter
+  extra_selector: ''                # e.g. 'cluster="prod"' to pick one cluster's series
+  verify_tls: true
+
+proxmox:
+  url: https://pve1.example.internal:8006
+  token_id: billing@pve!invoicer    # read-only token, role PVEAuditor on /
+  verify_tls: true                  # or a path to your CA bundle
+
+smtp:
+  host: smtp.example.internal
+  port: 587
+  security: starttls                # starttls | ssl | none
+  username: billing@example.net     # omit if the relay needs no login
+  from: "Example Hosting <billing@example.net>"
+  admin_email: admin@example.net    # receives the monthly summary
+  bcc: [accounts@example.net]       # optional copy of every invoice
+
+issuer:
+  name: Example Hosting
+  address: |
+    1 Main Street
+    12345 Springfield
+  email: billing@example.net
+  payment_details: |
+    Bank transfer to IBAN XX00 0000 0000 0000, quoting the invoice number.
+
+invoice:
+  number_format: "{year}-{month:02d}-{seq:04d}"
+  due_days: 14
+  # template_dir: /etc/pve-invoicer/templates   # optional: your own invoice.html.j2 / invoice_email.txt.j2

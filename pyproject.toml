@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pve-invoicer"
+version = "0.1.0"
+description = "Monthly usage invoices for Proxmox VE guests, from prometheus-pve-exporter metrics and VM notes"
+requires-python = ">=3.10"
+dependencies = [
+  "requests>=2.28",
+  "PyYAML>=6.0",
+  "Jinja2>=3.1",
+  "weasyprint>=60",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.scripts]
+pve-invoicer = "pve_invoicer.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pve_invoicer = ["templates/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

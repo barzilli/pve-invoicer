@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Invoice {{ number }}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm; @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 8pt; color: #777; } }
+  body { font-family: "DejaVu Sans", Helvetica, Arial, sans-serif; font-size: 9.5pt; color: #222; }
+  h1 { font-size: 20pt; margin: 0 0 2mm; letter-spacing: .5px; }
+  .muted { color: #666; }
+  .head { display: flex; justify-content: space-between; margin-bottom: 10mm; }
+  .head .issuer { text-align: right; white-space: pre-line; }
+  .parties { display: flex; justify-content: space-between; margin-bottom: 8mm; }
+  .parties div { width: 48%; white-space: pre-line; }
+  .label { font-size: 8pt; text-transform: uppercase; color: #777; letter-spacing: .5px; margin-bottom: 1mm; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 8pt; text-transform: uppercase; color: #555; border-bottom: 1.2pt solid #222; padding: 1.5mm 1mm; }
+  td { padding: 1.6mm 1mm; border-bottom: .5pt solid #ddd; vertical-align: top; }
+  .num { text-align: right; white-space: nowrap; }
+  .guest { font-weight: bold; }
+  .sub td { border-bottom: none; padding-top: 0; padding-bottom: .6mm; color: #444; }
+  .sub td:first-child { padding-left: 5mm; }
+  .linetotal td { font-weight: bold; border-bottom: .5pt solid #bbb; }
+  .total td { font-size: 12pt; font-weight: bold; border-top: 1.2pt solid #222; border-bottom: none; padding-top: 3mm; }
+  .notes { margin-top: 10mm; white-space: pre-line; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div>
+      <h1>Invoice</h1>
+      <div>No. <strong>{{ number }}</strong></div>
+      <div class="muted">Period {{ period }}</div>
+      <div class="muted">Issued {{ issue_date.isoformat() }} &middot; Due {{ due_date.isoformat() }}</div>
+    </div>
+    <div class="issuer"><strong>{{ issuer.name }}</strong>
+{{ issuer.address }}{% if issuer.email %}
+{{ issuer.email }}{% endif %}</div>
+  </div>
+
+  <div class="parties">
+    <div><div class="label">Bill to</div><strong>{{ customer.owner or customer.customer_id }}</strong>
+{{ customer.address }}
+{{ customer.email }}{% if customer.vat_id %}
+VAT ID {{ customer.vat_id }}{% endif %}</div>
+    <div><div class="label">Reference</div>Customer {{ customer.customer_id }}{% if customer.po_number %}
+PO {{ customer.po_number }}{% endif %}{% if customer.reference %}
+{{ customer.reference }}{% endif %}</div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Guest / item</th><th class="num">Quantity</th><th class="num">Rate ({{ currency }})</th><th class="num">Amount ({{ currency }})</th></tr>
+    </thead>
+    <tbody>
+    {% for l in lines %}
+      <tr><td class="guest" colspan="4">{{ l.name or l.guest_id }} <span class="muted">({{ l.guest_id }}, {{ l.usage.running_hours|num(1) }} h running over {{ l.usage.days }} days)</span></td></tr>
+      <tr class="sub"><td>vCPU allocated</td><td class="num">{{ l.usage.vcpu_hours|num(1) }} vCPU-h</td><td class="num">{{ rates.vcpu_hour }}</td><td class="num">{{ l.cpu|num }}</td></tr>
+      <tr class="sub"><td>RAM allocated</td><td class="num">{{ l.usage.ram_gib_hours|num(1) }} GiB-h</td><td class="num">{{ rates.ram_gib_hour }}</td><td class="num">{{ l.ram|num }}</td></tr>
+      <tr class="sub"><td>Disk allocated</td><td class="num">{{ l.disk_gib_avg|num(1) }} GiB avg</td><td class="num">{{ rates.disk_gib_month }}/month</td><td class="num">{{ l.disk|num }}</td></tr>
+      <tr class="sub"><td>Network ({{ l.usage.net_in_gb|num(2) }} in + {{ l.usage.net_out_gb|num(2) }} out)</td><td class="num">{{ l.usage.net_gb|num(2) }} GB</td><td class="num">{{ rates.network_gb }}</td><td class="num">{{ l.net|num }}</td></tr>
+      <tr class="linetotal"><td colspan="3">Subtotal {{ l.name or l.guest_id }}</td><td class="num">{{ l.total|num }}</td></tr>
+    {% endfor %}
+      <tr class="total"><td colspan="3">Total due</td><td class="num">{{ total|num }} {{ currency }}</td></tr>
+    </tbody>
+  </table>
+
+  <div class="notes">{% if issuer.payment_details %}<div class="label">Payment</div>{{ issuer.payment_details }}{% endif %}
+<span class="muted">CPU and RAM are billed on allocation while the guest is running. Disk is billed on allocated size for every day the guest exists. Network counts inbound plus outbound traffic. 1 GiB = 1024³ bytes, 1 GB = 10⁹ bytes.</span></div>
+</body>
+</html>

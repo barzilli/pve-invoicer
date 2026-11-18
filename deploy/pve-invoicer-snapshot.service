@@ -1,0 +1,10 @@
+[Unit]
+Description=pve-invoicer: store yesterday's Proxmox guest usage and notes
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pve-invoicer
+EnvironmentFile=/etc/pve-invoicer/env
+ExecStart=/opt/pve-invoicer/venv/bin/pve-invoicer -c /etc/pve-invoicer/config.yaml snapshot

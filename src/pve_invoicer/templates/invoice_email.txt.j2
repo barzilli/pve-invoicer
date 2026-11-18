@@ -1,0 +1,13 @@
+{% if customer.owner %}Dear {{ customer.owner }},{% else %}Hello,{% endif %}
+
+Attached is invoice {{ number }} for your Proxmox usage in {{ period }}.
+
+Total: {{ total|num }} {{ currency }}
+Due:   {{ due_date.isoformat() }}
+{% if issuer.payment_details %}
+Payment details:
+{{ issuer.payment_details }}
+{% endif %}
+Questions about this invoice? Reply to this email{% if issuer.email %} or write to {{ issuer.email }}{% endif %}.
+
+{{ issuer.name }}
