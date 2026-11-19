@@ -1,10 +1,12 @@
 [Unit]
-Description=Daily pve-invoicer snapshot
+Description=Hourly pve-invoicer snapshot
 
 [Timer]
-OnCalendar=*-*-* 00:15:00
+# The RRD API keeps 70 minutes of 1-minute data, so run every hour. A late or missed run is
+# caught up from coarser 30-minute data, and Persistent=true runs once at boot if one was missed.
+OnCalendar=*-*-* *:05:00
 Persistent=true
-RandomizedDelaySec=120
+RandomizedDelaySec=60
 
 [Install]
 WantedBy=timers.target

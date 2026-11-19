@@ -1,32 +1,51 @@
 # pve-invoicer
 
-Monthly usage invoices for Proxmox VE guests. It reads usage from the Prometheus that already scrapes
-[prometheus-pve-exporter](https://github.com/prometheus-pve/prometheus-pve-exporter), reads each guest's
-owner from a `billing` block in its notes, and emails every owner one PDF invoice per month.
+Monthly usage invoices for Proxmox VE guests (QEMU VMs and LXC containers). It reads usage straight from
+the Proxmox VE API with a read-only token, reads each guest's owner from a `billing` block in its notes,
+and emails every owner one PDF invoice per month.
 
-It does no provisioning, writes nothing to Proxmox or Prometheus, and needs nothing installed on the
-Proxmox hosts.
+It does no provisioning, writes nothing to Proxmox, and needs nothing installed on the Proxmox hosts. No
+Prometheus or exporter is needed.
 
 ## How it works
 
 | Job | When | What it does |
 | --- | --- | --- |
-| `pve-invoicer snapshot` | daily, 00:15 | Stores yesterday's usage per guest from Prometheus and every guest's notes from the Proxmox API in SQLite. |
-| `pve-invoicer invoice` | 1st of the month, 06:00 | Rebuilds any missing days from Prometheus, prices last month, writes a PDF and JSON per customer, emails each owner, then emails the admin a summary. |
+| `pve-invoicer snapshot` | hourly, at :05 | Lists guests from `/cluster/resources`, stores each guest's last 70 minutes of 1-minute usage from `/nodes/{node}/{qemu,lxc}/{vmid}/rrddata`, updates the day's usage rows and records every guest's notes, all in SQLite. |
+| `pve-invoicer invoice` | 1st of the month, 06:00 | Rebuilds any missing days from the Proxmox RRD history, prices last month, writes a PDF and JSON per customer, emails each owner, then emails the admin a summary. |
+
+### Where the numbers come from
+
+Proxmox keeps a round-robin history (RRD) for every guest. The API serves it per timeframe, about 70 points
+each: `hour` at 1-minute resolution, `day` at 30 minutes, `week` at 3 hours, `month` at 12 hours.
+
+The hourly snapshot reads the `hour` timeframe, so runs overlap by about 10 minutes and every minute of a
+guest's life is stored at 1-minute resolution. If a run was missed or late, a node was unreachable, or a guest
+is new, the snapshot reads coarser timeframes for just the minutes the finer data does not cover. Such days
+are flagged in the admin summary as "partly built from 30-minute RRD averages", because a guest started or
+stopped inside a coarse interval is counted as running or stopped for all of it.
+
+Per-minute samples are kept for 7 days. After that, days that have a usage row are final and later runs
+never change them.
+
+A guest deleted between two runs is billed up to the last run before its deletion (at most about an hour is
+lost), because a deleted guest no longer appears in `/cluster/resources`.
 
 ### What is billed
 
 | Item | Measured as | Rate key |
 | --- | --- | --- |
-| CPU | allocated vCPUs × hours the guest runs (`pve_up` × `pve_cpu_usage_limit`) | `vcpu_hour` |
-| RAM | allocated GiB × hours the guest runs (`pve_up` × `pve_memory_size_bytes`) | `ram_gib_hour` |
-| Disk | allocated GiB for every day the guest exists, running or stopped (`pve_disk_size_bytes`) | `disk_gib_month` (prorated by day) |
-| Traffic | GB in + out (`increase()` of the `pve_network_*_bytes_total` counters, safe across reboots) | `network_gb` |
+| CPU | allocated vCPUs (`maxcpu`) × minutes the guest runs (RRD `cpu` is reported) | `vcpu_hour` |
+| RAM | allocated GiB (`maxmem`) × minutes the guest runs | `ram_gib_hour` |
+| Disk | allocated GiB (`maxdisk`) for every minute the guest exists, running or stopped | `disk_gib_month` (prorated by day) |
+| Traffic | GB in + out (`netin` + `netout`, bytes per second × interval) | `network_gb` |
 
-All metrics are reduced with `max by (id)`, so it does not matter how many exporters scrape the cluster.
-Time-based measures are summed from a `step_minutes` subquery, so a guest created mid-day pays for part of
-the day, and a gap in Prometheus data under-bills rather than over-bills. Each component of each guest line is
-rounded to cents, and the invoice total is their sum. There is no tax.
+Allocations are taken from each RRD point, so a guest resized mid-day pays the old size before and the new
+size after. A guest created mid-day pays for part of the day, and a gap in the data under-bills rather than
+over-bills. Each component of each guest line is rounded to cents, and the invoice total is their sum.
+There is no tax.
+
+For QEMU VMs, Proxmox reports `maxdisk` as the size of the boot disk, not the sum of all disks.
 
 Day and month boundaries follow `timezone` in the config, including 23- and 25-hour days at DST changes.
 
@@ -65,10 +84,11 @@ Run `pve-invoicer check-notes` at any time to see which guests have a valid bloc
 
 ## Install
 
-On any small Linux VM or LXC that can reach Prometheus, the Proxmox API (port 8006) and your SMTP relay:
+On any small Linux VM or LXC that can reach the Proxmox API (port 8006) and your SMTP relay:
 
 ```sh
-# 1. Proxmox: a read-only API token (run once on any node)
+# 1. Proxmox: a read-only API token (run once on any node). PVEAuditor is enough for the
+#    guest list, RRD usage history and notes.
 pveum user add billing@pve
 pveum acl modify / --users billing@pve --roles PVEAuditor
 pveum user token add billing@pve invoicer --privsep 0     # note the secret it prints
@@ -97,14 +117,15 @@ sudo systemctl enable --now pve-invoicer-snapshot.timer pve-invoicer-invoice.tim
 
 Set the machine's clock timezone to the same `timezone` as the config, or adjust the `OnCalendar` times.
 
-The first invoice run covers the first **full** month after you enable the daily snapshot. Days from before
-can be backfilled with `pve-invoicer snapshot --date YYYY-MM-DD` while Prometheus still has the data
-(default retention is 15 days). Backfilled days use the notes recorded nearest to them.
+The first invoice run covers the first **full** month after you enable the hourly snapshot. Earlier days can
+be backfilled with `pve-invoicer snapshot --since YYYY-MM-DD`, from the coarser RRD history (12-hour
+averages a few weeks back), and are flagged as approximate. Backfilled days use the notes recorded nearest
+to them.
 
 ## Commands
 
 ```text
-pve-invoicer [-c CONFIG] snapshot [--date YYYY-MM-DD] [--with-notes]
+pve-invoicer [-c CONFIG] snapshot [--since YYYY-MM-DD] [--no-notes]
 pve-invoicer [-c CONFIG] invoice  [--month YYYY-MM] [--dry-run] [--no-backfill]
 pve-invoicer [-c CONFIG] release  YYYY-MM CUSTOMER_ID
 pve-invoicer [-c CONFIG] check-notes
@@ -119,8 +140,9 @@ pve-invoicer [-c CONFIG] check-notes
 ## Files
 
 * `output_dir/YYYY-MM/<number>_<customer>.pdf` and `.json`: each invoice and the exact figures behind it.
-* `database` (SQLite): `usage_daily` (one row per guest per day, with the notes seen that day) and
-  `invoices` (number, status `sent`/`held`/`failed`, timestamps, SMTP message ID).
+* `database` (SQLite): `usage_samples` (per-minute usage, last 7 days), `usage_daily` (one row per guest per
+  day, with the notes seen that day, `coverage` and the coarsest RRD `resolution_s` used) and `invoices`
+  (number, status `sent`/`held`/`failed`, timestamps, SMTP message ID).
 
 To change the invoice layout, copy `src/pve_invoicer/templates/` to a folder, edit it, and set
 `invoice.template_dir`.
@@ -132,5 +154,6 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[test]'
 .venv/bin/pytest
 ```
 
-The tests use fake Prometheus, Proxmox and SMTP clients and cover pricing, held and failed invoices, re-runs,
-DST days, missing days and real PDF rendering.
+The tests use a fake Proxmox API, whose RRD history is computed from a per-minute model of each guest, and
+a fake SMTP client. They cover pricing, held and failed invoices, re-runs, missed hourly runs, nodes that are
+down, backfill from coarse history, DST days, missing days and real PDF rendering.
