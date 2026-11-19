@@ -4,8 +4,7 @@ Monthly usage invoices for Proxmox VE guests (QEMU VMs and LXC containers). It r
 the Proxmox VE API with a read-only token, reads each guest's owner from a `billing` block in its notes,
 and emails every owner one PDF invoice per month.
 
-It does no provisioning, writes nothing to Proxmox, and needs nothing installed on the Proxmox hosts. No
-Prometheus or exporter is needed.
+It does no provisioning, writes nothing to Proxmox, and needs nothing installed on the Proxmox hosts.
 
 ## How it works
 
