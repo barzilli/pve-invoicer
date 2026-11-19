@@ -24,16 +24,6 @@ class Rates:
 
 
 @dataclass(frozen=True)
-class PrometheusConfig:
-    url: str
-    step_minutes: int = 5
-    extra_selector: str = ""  # e.g. 'cluster="prod"', added to every metric selector
-    timeout: int = 60
-    verify_tls: bool = True
-    bearer_token: str | None = None  # from env PROMETHEUS_TOKEN
-
-
-@dataclass(frozen=True)
 class ProxmoxConfig:
     url: str
     token_id: str  # user@realm!tokenname
@@ -69,14 +59,13 @@ class Config:
     output_dir: Path
     currency: str
     rates: Rates
-    prometheus: PrometheusConfig
     proxmox: ProxmoxConfig
     smtp: SmtpConfig
     issuer: Issuer
     number_format: str = "{year}-{month:02d}-{seq:04d}"
     due_days: int = 14
     template_dir: Path | None = None
-    min_coverage: float = 0.95  # flag guest-days with fewer samples than this share
+    min_coverage: float = 0.95  # flag guest-days with fewer minutes of data than this share
     extra: dict = field(default_factory=dict)
 
 
@@ -109,18 +98,6 @@ def load_config(path: str | Path, env: dict | None = None) -> Config:
         disk_gib_month=_dec(rates_raw, "disk_gib_month"),
         network_gb=_dec(rates_raw, "network_gb"),
     )
-
-    p = _req(raw, "prometheus", "")
-    prometheus = PrometheusConfig(
-        url=_req(p, "url", "prometheus").rstrip("/"),
-        step_minutes=int(p.get("step_minutes", 5)),
-        extra_selector=str(p.get("extra_selector", "") or ""),
-        timeout=int(p.get("timeout", 60)),
-        verify_tls=p.get("verify_tls", True),
-        bearer_token=env.get("PROMETHEUS_TOKEN") or None,
-    )
-    if prometheus.step_minutes < 1 or 60 % prometheus.step_minutes:
-        raise ConfigError("prometheus.step_minutes must divide 60 evenly (1, 2, 5, 10, 15, 30 ...)")
 
     x = _req(raw, "proxmox", "")
     secret = env.get("PVE_TOKEN_SECRET")
@@ -170,7 +147,6 @@ def load_config(path: str | Path, env: dict | None = None) -> Config:
         output_dir=Path(raw.get("output_dir", "/var/lib/pve-invoicer/invoices")),
         currency=str(_req(raw, "currency", "")),
         rates=rates,
-        prometheus=prometheus,
         proxmox=proxmox,
         smtp=smtp,
         issuer=issuer,

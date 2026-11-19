@@ -5,18 +5,18 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timezone
 
 from . import __version__
 from .billing import month_days, previous_month
-from .clients import ClientError, PrometheusClient, ProxmoxClient
+from .clients import ClientError, ProxmoxClient
 from .config import ConfigError, load_config
 from .db import connect
 from .invoicing import run_month
 from .mailer import SmtpMailer
 from .notes import parse_notes
 from .render import Renderer
-from .snapshot import missing_days, snapshot_day
+from .snapshot import collect, missing_days
 
 log = logging.getLogger("pve_invoicer")
 
@@ -38,13 +38,10 @@ def _day(s: str) -> date:
 
 def cmd_snapshot(cfg, args) -> int:
     conn = connect(cfg.database)
-    prom, pve = PrometheusClient(cfg.prometheus), ProxmoxClient(cfg.proxmox)
-    today = datetime.now(timezone.utc).astimezone(cfg.timezone).date()
-    day = args.date or today - timedelta(days=1)
-    # Notes reflect the guest's state now, so only read them for yesterday unless asked.
-    read_notes = args.with_notes or args.date is None
-    rep = snapshot_day(conn, cfg, prom, pve, day, read_notes=read_notes)
-    print(f"{day}: {rep.guests} guests, notes read for {rep.notes_read}")
+    since = datetime.combine(args.since, time(0), tzinfo=cfg.timezone) if args.since else None
+    rep = collect(conn, cfg, ProxmoxClient(cfg.proxmox), read_notes=not args.no_notes, since=since)
+    days = f"{rep.days[0]}..{rep.days[-1]}" if len(rep.days) > 1 else (str(rep.days[0]) if rep.days else "none")
+    print(f"{rep.guests} guests, {rep.samples} minute samples, days updated: {days}, notes read for {rep.notes_read}")
     for w in rep.warnings:
         print("warning:", w, file=sys.stderr)
     return 0
@@ -61,13 +58,17 @@ def cmd_invoice(cfg, args, release=None, only=None) -> int:
     if not args.no_backfill:
         gaps = missing_days(conn, month_days(year, month))
         if gaps:
-            prom, pve = PrometheusClient(cfg.prometheus), ProxmoxClient(cfg.proxmox)
+            since = datetime.combine(gaps[0], time(0), tzinfo=cfg.timezone)
+            try:
+                collect(conn, cfg, ProxmoxClient(cfg.proxmox), read_notes=False, since=since)
+            except ClientError as e:
+                log.error("could not backfill from %s: %s", gaps[0], e)
+            still = set(missing_days(conn, gaps))
             for d in gaps:
-                try:
-                    snapshot_day(conn, cfg, prom, pve, d, read_notes=False)
-                    log.warning("backfilled missing snapshot for %s from Prometheus (notes carried forward)", d)
-                except ClientError as e:
-                    log.error("could not backfill %s: %s", d, e)
+                if d in still:
+                    log.error("no usage data for %s, not even in the Proxmox RRD history", d)
+                else:
+                    log.warning("backfilled missing day %s from Proxmox RRD history (notes carried forward)", d)
 
     rep = run_month(conn, cfg, year, month, Renderer(cfg), SmtpMailer(cfg.smtp),
                     dry_run=args.dry_run, release=release, only=only)
@@ -110,14 +111,15 @@ def main(argv=None) -> int:
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("snapshot", help="store one day's usage and notes (default: yesterday)")
-    s.add_argument("--date", type=_day, help="day to (re)build, YYYY-MM-DD")
-    s.add_argument("--with-notes", action="store_true", help="also record current notes for --date")
+    s = sub.add_parser("snapshot", help="store recent guest usage and notes from the Proxmox API (run hourly)")
+    s.add_argument("--since", type=_day, metavar="YYYY-MM-DD",
+                   help="also rebuild from this day, as far back as the Proxmox RRD history reaches")
+    s.add_argument("--no-notes", action="store_true", help="do not read guest notes")
 
     i = sub.add_parser("invoice", help="invoice a month (default: last month) and email owners")
     i.add_argument("--month", type=_month, help="YYYY-MM")
     i.add_argument("--dry-run", action="store_true", help="render PDFs and email only the admin")
-    i.add_argument("--no-backfill", action="store_true", help="do not rebuild missing days from Prometheus")
+    i.add_argument("--no-backfill", action="store_true", help="do not rebuild missing days from the Proxmox RRD history")
 
     r = sub.add_parser("release", help="send a held invoice after checking it")
     r.add_argument("month", type=_month, help="YYYY-MM")

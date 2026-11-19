@@ -1,4 +1,4 @@
-"""SQLite storage: one usage row per guest per day, one invoice row per customer per month."""
+"""SQLite storage: recent per-minute samples, one usage row per guest per day, one invoice row per customer per month."""
 
 from __future__ import annotations
 
@@ -17,11 +17,28 @@ CREATE TABLE IF NOT EXISTS usage_daily (
     disk_gib_days   REAL NOT NULL DEFAULT 0,
     net_in_gb       REAL NOT NULL DEFAULT 0,
     net_out_gb      REAL NOT NULL DEFAULT 0,
-    coverage        REAL NOT NULL DEFAULT 0,  -- share of expected samples present, 0..1
+    coverage        REAL NOT NULL DEFAULT 0,  -- share of the day's minutes with data, 0..1
+    resolution_s    INTEGER NOT NULL DEFAULT 60,  -- coarsest RRD step used for the day (60 = 1-minute data)
     description     TEXT,               -- guest notes that day; NULL = not read (backfill/deleted)
     collected_at    TEXT NOT NULL,
     PRIMARY KEY (day, guest_id)
 );
+
+-- One row per guest per minute, from the Proxmox RRD API. Kept for a few days only, so
+-- overlapping hourly runs can be merged and recent days rebuilt; usage_daily is the record.
+CREATE TABLE IF NOT EXISTS usage_samples (
+    guest_id   TEXT NOT NULL,
+    ts         INTEGER NOT NULL,       -- unix time, start of the minute
+    step       INTEGER NOT NULL,       -- RRD resolution the value came from, seconds
+    running    INTEGER NOT NULL,       -- 1 if the guest was running
+    vcpus      REAL NOT NULL,          -- allocated (maxcpu)
+    mem_bytes  REAL NOT NULL,          -- allocated (maxmem)
+    disk_bytes REAL NOT NULL,          -- allocated (maxdisk)
+    net_in     REAL NOT NULL,          -- bytes received in this minute
+    net_out    REAL NOT NULL,          -- bytes sent in this minute
+    PRIMARY KEY (guest_id, ts)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS usage_samples_ts ON usage_samples (ts);
 
 CREATE TABLE IF NOT EXISTS invoices (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,8 +67,11 @@ def connect(path: str | Path) -> sqlite3.Connection:
     path = Path(path)
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(usage_daily)")}
+    if "resolution_s" not in cols:  # databases created before the switch to the Proxmox API
+        conn.execute("ALTER TABLE usage_daily ADD COLUMN resolution_s INTEGER NOT NULL DEFAULT 60")
     return conn

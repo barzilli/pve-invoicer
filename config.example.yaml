@@ -2,12 +2,11 @@
 # Secrets are NOT stored here. Set them in /etc/pve-invoicer/env:
 #   PVE_TOKEN_SECRET=...   (Proxmox API token secret, required)
 #   SMTP_PASSWORD=...      (if your relay needs a login)
-#   PROMETHEUS_TOKEN=...   (only if Prometheus needs a bearer token)
 
 timezone: Europe/Amsterdam          # day and month boundaries
 database: /var/lib/pve-invoicer/invoicer.db
 output_dir: /var/lib/pve-invoicer/invoices
-min_coverage: 0.95                  # warn when a running guest has fewer samples than this on a day
+min_coverage: 0.95                  # warn when a running guest has data for less of a day than this
 
 currency: EUR
 rates:                              # cluster-wide, applied to every guest
@@ -16,13 +15,7 @@ rates:                              # cluster-wide, applied to every guest
   disk_gib_month: 0.05              # per allocated GiB disk per month, running or stopped
   network_gb: 0.01                  # per GB (10^9 bytes) in + out
 
-prometheus:
-  url: http://prometheus.example.internal:9090
-  step_minutes: 5                   # >= your scrape interval of the pve exporter
-  extra_selector: ''                # e.g. 'cluster="prod"' to pick one cluster's series
-  verify_tls: true
-
-proxmox:
+proxmox:                            # usage, inventory and notes all come from here
   url: https://pve1.example.internal:8006
   token_id: billing@pve!invoicer    # read-only token, role PVEAuditor on /
   verify_tls: true                  # or a path to your CA bundle

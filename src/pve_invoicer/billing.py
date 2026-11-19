@@ -1,4 +1,4 @@
-"""Turn a month of daily snapshots into one priced draft invoice per customer."""
+"""Turn a month of daily usage rows into one priced draft invoice per customer."""
 
 from __future__ import annotations
 
@@ -145,6 +145,7 @@ def build_month(conn, cfg: Config, year: int, month: int) -> MonthResult:
     identities: dict[str, dict[tuple, set[str]]] = defaultdict(lambda: defaultdict(set))
     unbilled: dict[str, Unbilled] = {}
 
+    coarse: dict[str, int] = {}  # day -> coarsest RRD step used
     for gid, grows in sorted(by_guest.items()):
         carry = before.get(gid)
         if carry is None:  # no notes before the month: use the first notes seen in it
@@ -157,6 +158,8 @@ def build_month(conn, cfg: Config, year: int, month: int) -> MonthResult:
                 warnings.append(
                     f"{gid} ({r['name']}) on {r['day']}: only {r['coverage']:.0%} of expected samples, may be under-billed"
                 )
+            if r["resolution_s"] > 60:
+                coarse[r["day"]] = max(coarse.get(r["day"], 0), r["resolution_s"])
             res = parsed(carry)
             if not res.ok:
                 reason = "no notes recorded" if carry is None else "; ".join(res.errors)
@@ -170,6 +173,12 @@ def build_month(conn, cfg: Config, year: int, month: int) -> MonthResult:
             prev = latest_info.get(info.customer_id)
             if prev is None or r["day"] >= prev[0]:
                 latest_info[info.customer_id] = (r["day"], info)
+
+    for day, step in sorted(coarse.items()):
+        warnings.append(
+            f"{day}: partly built from {step // 60}-minute RRD averages (hourly snapshots missed?), "
+            "running time is approximate"
+        )
 
     drafts: list[Draft] = []
     for cust in sorted(latest_info):

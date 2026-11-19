@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pve-invoicer"
 version = "0.1.0"
-description = "Monthly usage invoices for Proxmox VE guests, from prometheus-pve-exporter metrics and VM notes"
+description = "Monthly usage invoices for Proxmox VE guests, from the Proxmox VE API and VM notes"
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.28",
