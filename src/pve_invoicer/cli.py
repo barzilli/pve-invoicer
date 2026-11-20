@@ -79,6 +79,8 @@ def cmd_invoice(cfg, args, release=None, only=None) -> int:
               + (f"  ({o.detail})" if o.detail else ""))
     if rep.month and rep.month.unbilled:
         print(f"{len(rep.month.unbilled)} guest(s) unbilled: no valid billing block (see admin summary)")
+        for u in rep.month.unbilled:
+            print(f"  {u.guest_id:<12} {u.name:<25} {u.reason}")
     if rep.summary_error:
         print("admin summary email failed:", rep.summary_error, file=sys.stderr)
     return 1 if rep.failed else 0

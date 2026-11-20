@@ -127,6 +127,19 @@ def build_month(conn, cfg: Config, year: int, month: int) -> MonthResult:
         )
     }
 
+    # Notes first recorded after the month, for guests with none before or in it (a month that was
+    # backfilled from the RRD history before the hourly snapshot recorded any notes).
+    after = {
+        r["guest_id"]: r["description"]
+        for r in conn.execute(
+            """SELECT u.guest_id, u.description FROM usage_daily u
+               JOIN (SELECT guest_id, MIN(day) AS day FROM usage_daily
+                     WHERE day > ? AND description IS NOT NULL GROUP BY guest_id) f
+               ON u.guest_id = f.guest_id AND u.day = f.day""",
+            (last,),
+        )
+    }
+
     by_guest: dict[str, list] = defaultdict(list)
     for r in rows:
         by_guest[r["guest_id"]].append(r)
@@ -149,7 +162,7 @@ def build_month(conn, cfg: Config, year: int, month: int) -> MonthResult:
     for gid, grows in sorted(by_guest.items()):
         carry = before.get(gid)
         if carry is None:  # no notes before the month: use the first notes seen in it
-            carry = next((r["description"] for r in grows if r["description"] is not None), None)
+            carry = next((r["description"] for r in grows if r["description"] is not None), after.get(gid))
         for r in grows:
             names[gid] = r["name"] or names.get(gid, "")
             if r["description"] is not None:
