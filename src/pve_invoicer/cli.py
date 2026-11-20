@@ -59,6 +59,7 @@ def cmd_invoice(cfg, args, release=None, only=None) -> int:
         gaps = missing_days(conn, month_days(year, month))
         if gaps:
             since = datetime.combine(gaps[0], time(0), tzinfo=cfg.timezone)
+            log.info("backfilling %d missing day(s) from %s out of the Proxmox RRD history", len(gaps), gaps[0])
             try:
                 collect(conn, cfg, ProxmoxClient(cfg.proxmox), read_notes=False, since=since)
             except ClientError as e:
@@ -70,6 +71,7 @@ def cmd_invoice(cfg, args, release=None, only=None) -> int:
                 else:
                     log.warning("backfilled missing day %s from Proxmox RRD history (notes carried forward)", d)
 
+    log.info("building invoices for %d-%02d%s", year, month, " (dry run)" if args.dry_run else "")
     rep = run_month(conn, cfg, year, month, Renderer(cfg), SmtpMailer(cfg.smtp),
                     dry_run=args.dry_run, release=release, only=only)
     for o in rep.outcomes:
@@ -77,6 +79,8 @@ def cmd_invoice(cfg, args, release=None, only=None) -> int:
               + (f"  ({o.detail})" if o.detail else ""))
     if rep.month and rep.month.unbilled:
         print(f"{len(rep.month.unbilled)} guest(s) unbilled: no valid billing block (see admin summary)")
+        for u in rep.month.unbilled:
+            print(f"  {u.guest_id:<12} {u.name:<25} {u.reason}")
     if rep.summary_error:
         print("admin summary email failed:", rep.summary_error, file=sys.stderr)
     return 1 if rep.failed else 0

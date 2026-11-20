@@ -147,6 +147,17 @@ def test_backfilled_days_carry_notes_forward(cfg, conn):
     assert m.drafts[0].lines[0].usage.days == 30
 
 
+def test_backfilled_month_uses_notes_recorded_after_it(cfg, conn):
+    """Installed in December: November is backfilled, notes are only known from December on."""
+    now = datetime(2026, 12, 10, 12, 5, tzinfo=timezone.utc)
+    pve = FakePve(cfg, {"qemu/100": USAGE["qemu/100"]}, {"qemu/100": ACME}, now=now)
+    collect(conn, cfg, pve, read_notes=True, now=now)  # first hourly snapshot records notes on Dec 10
+    collect(conn, cfg, pve, read_notes=False, since=NOV_START, now=now)  # the invoice run's backfill
+    m = build_month(conn, cfg, 2026, 11)
+    assert not m.unbilled
+    assert m.drafts[0].customer.customer_id == "ACME"
+
+
 def test_guest_stopped_part_of_day_pays_cpu_for_running_hours_only(cfg, conn):
     usage = {"qemu/100": {"vcpus": 4, "ram_gib": 8, "disk_gib": 40, "up_hours": 9.5}}
     pve = FakePve(cfg, usage, {"qemu/100": ACME})

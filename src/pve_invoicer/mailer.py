@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import smtplib
 import ssl
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 
 from .config import SmtpConfig
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,7 @@ class SmtpMailer:
 
         recipients = [*to, *cc, *bcc]
         ctx = ssl.create_default_context()
+        log.info("connecting to SMTP server %s:%d (%s)", self.cfg.host, self.cfg.port, self.cfg.security)
         if self.cfg.security == "ssl":
             server = smtplib.SMTP_SSL(self.cfg.host, self.cfg.port, context=ctx, timeout=60)
         else:
