@@ -134,6 +134,7 @@ def run_month(conn, cfg: Config, year: int, month: int, renderer, mailer, *, dry
         safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in f"{number}_{cust}")
         pdf_path = out_dir / f"{safe}.pdf"
         json_path = out_dir / f"{safe}.json"
+        log.info("rendering %s for %s", pdf_path.name, cust)
         pdf = renderer.pdf(pdf_path, **ctx)
         json_path.write_text(json.dumps(_figures(ctx), indent=2), encoding="utf-8")
         total = str(draft.total)
@@ -157,6 +158,7 @@ def run_month(conn, cfg: Config, year: int, month: int, renderer, mailer, *, dry
             report.outcomes.append(Outcome(cust, number, draft.customer.email, total, "held", draft.hold_reason, pdf_path))
             continue
 
+        log.info("emailing %s to %s", number, draft.customer.email)
         try:
             msg_id = mailer.send(
                 to=[draft.customer.email],
@@ -239,5 +241,6 @@ def send_summary(cfg: Config, report: RunReport, renderer, mailer, pdfs: list[At
         flag = "[DRY RUN] "
     elif any(o.status in ("held", "failed") for o in report.outcomes) or (report.month and report.month.unbilled):
         flag = "[ACTION NEEDED] "
+    log.info("emailing the summary to %s", cfg.smtp.admin_email)
     mailer.send(to=[cfg.smtp.admin_email], subject=f"{flag}Proxmox invoices {report.period}",
                 body=summary_text(cfg, report), attachments=attachments)

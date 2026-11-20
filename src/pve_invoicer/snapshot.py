@@ -192,7 +192,9 @@ def collect(conn, cfg: Config, pve, read_notes: bool = True, since: datetime | N
         return m < cutoff_ts and _local_day(m, cfg) in frozen
 
     with conn:
-        for g in guests:
+        progress = log.info if since_ts is not None else log.debug  # a backfill can take a while
+        for n, g in enumerate(guests, start=1):
+            progress("reading RRD data for %s (%s), guest %d of %d", g.guest_id, g.name, n, len(guests))
             if since_ts is not None:
                 want_from = since_ts
             elif g.guest_id in last:
